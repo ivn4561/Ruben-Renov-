@@ -561,6 +561,8 @@
         <button class="btn small ghost" type="button" data-rot="x">Girar 90° (X)</button>
         <button class="btn small ghost" type="button" data-rot="z">Girar 90° (Z)</button>
       </div>
+      <button id="alignBtn" class="btn small" type="button">Enderezar con 2 puntos</button>
+      <p>Para escaneos que quedaron girados en ángulo: toca el centro de la rueda delantera y luego el de la trasera del mismo lado. La app pone la van recta con el frente hacia la flecha.</p>
     </section>
 
     <details class="sec">
@@ -901,12 +903,12 @@
     dirty = true;
   }
 
-  function rotateModel(axis) {
+  function rotateModel(axis, angle = Math.PI / 2) {
     if (!content) return;
     content.updateMatrixWorld(true);
     const before = content.matrixWorld.clone();
     const ax = { x: new V3(1, 0, 0), y: new V3(0, 1, 0), z: new V3(0, 0, 1) }[axis];
-    content.rotateOnWorldAxis(ax, Math.PI / 2);
+    content.rotateOnWorldAxis(ax, angle);
     content.updateMatrixWorld(true);
     // re-apoyar en el piso
     const b = new THREE.Box3().setFromObject(content);
@@ -1207,6 +1209,36 @@
     dirty = true;
   }
 
+  // Enderezar: punto 1 = rueda delantera, punto 2 = rueda trasera (mismo lado).
+  function tapAlign(e) {
+    const hit = hitModel(e);
+    if (!hit) { toast('Toca sobre la rueda del escaneo.'); return; }
+    if (!state.alignA) {
+      state.alignA = hit;
+      pendingDot.position.copy(hit);
+      pendingDot.scale.setScalar(handleR());
+      pendingDot.visible = true;
+      overlay.visible = true;
+      updateHint();
+      dirty = true;
+      return;
+    }
+    const v = state.alignA.clone().sub(hit);   // de atrás hacia adelante
+    state.alignA = null;
+    pendingDot.visible = false;
+    if (Math.hypot(v.x, v.z) < modelSize * 0.05) { toast('Los dos puntos están muy cerca. Toca una rueda delantera y una trasera.'); updateHint(); return; }
+    const a = Math.atan2(v.z, v.x);
+    rotateModel('y', a);
+    setMode('measure');
+    toast('Van enderezada (' + nf.format(a * 180 / Math.PI) + '°). Revisa el largo total y calibra.');
+  }
+  $('#alignBtn').addEventListener('click', () => {
+    if (!content) return;
+    state.alignA = null;
+    if (state.view === 'top') setView('3d');
+    setMode('align');
+  });
+
   let down = null, drag = null, hoverRaf = 0;
   const pointers = new Set();
 
@@ -1265,6 +1297,7 @@
       if (moved < 7 && performance.now() - down.t < 500) {
         if (state.mode === 'measure') tapAt(e);
         else if (state.mode === 'design') tapDesign(e);
+        else if (state.mode === 'align') tapAlign(e);
       }
     }
     if (pointers.size === 0) down = null;
@@ -1272,12 +1305,16 @@
   stage.addEventListener('pointerup', (e) => endPointer(e, false), { capture: true });
   stage.addEventListener('pointercancel', (e) => endPointer(e, true), { capture: true });
   window.addEventListener('keydown', (e) => { if (e.key === 'Escape') cancelPending(); });
-  $('#cancelBtn').addEventListener('click', cancelPending);
+  $('#cancelBtn').addEventListener('click', () => {
+    if (state.mode === 'align') { state.alignA = null; pendingDot.visible = false; setMode('measure'); }
+    else cancelPending();
+  });
 
   function updateHint() {
     const t = $('#hintText');
-    $('#cancelBtn').hidden = !state.pending;
-    if (state.mode === 'design') t.textContent = state.view === '3d' ? 'Elige una vista plana (Izq., Der., Atrás…) para mover el diseño' : (selDesign() && selDesign().view === state.view ? 'Arrastra la imagen · esquinas agrandan · lados estiran' : 'Pulsa «Importar diseño» o toca un diseño');
+    $('#cancelBtn').hidden = !state.pending && !(state.mode === 'align');
+    if (state.mode === 'align') t.textContent = state.alignA ? 'Ahora toca el centro de la rueda TRASERA (mismo lado)' : 'Toca el centro de la rueda DELANTERA';
+    else if (state.mode === 'design') t.textContent = state.view === '3d' ? 'Elige una vista plana (Izq., Der., Atrás…) para mover el diseño' : (selDesign() && selDesign().view === state.view ? 'Arrastra la imagen · esquinas agrandan · lados estiran' : 'Pulsa «Importar diseño» o toca un diseño');
     else if (state.mode === 'move') t.textContent = state.view === '3d' ? 'Arrastra para girar · pellizca para acercar' : 'Arrastra para desplazar · pellizca para acercar';
     else if (state.pending) t.textContent = 'Ahora toca el punto B';
     else t.textContent = 'Toca el punto A en el carro';

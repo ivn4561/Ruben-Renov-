@@ -43,7 +43,10 @@ se abre en el navegador del iPhone o del computador.
    - Exporta el modelo en **GLB** y pásalo al computador o déjalo en Archivos del iPhone.
 2. **Abre la app** y toca «Cargar escaneo 3D».
 3. **Oriéntalo**: el frente debe apuntar a la flecha **FRENTE** y las ruedas deben quedar en el piso.
-   Si no es así, usa los botones de «Orientación del modelo».
+   - Si quedó acostado o al revés, usa los botones «Girar 90°».
+   - Si quedó girado en un ángulo cualquiera (lo normal en un escaneo), pulsa **«Enderezar con 2 puntos»**
+     y toca el centro de la rueda delantera y luego el de la trasera del mismo lado.
+   - Haz esto **antes** de colocar diseños: los diseños se pegan a la cara (izquierda, derecha…), no a la chapa.
 4. **Calibra**: mide la distancia entre los centros de las ruedas con cinta métrica. Márcala en la app,
    escribe el valor real y pulsa «Calibrar escala». Esto corrige el pequeño error del escaneo (1–3 %).
 5. **Mide las zonas que vas a rotular**: puertas, panel lateral, puertas traseras y capó.
