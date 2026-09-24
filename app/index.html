@@ -1,3 +1,4 @@
+<meta charset="utf-8">
 <title>Plantilla Transit</title>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -375,6 +376,18 @@
     padding: 2px 7px; border-radius: 5px; white-space: nowrap;
     pointer-events: none;
   }
+  .tip {
+    position: absolute; left: 50%; top: 58px; transform: translateX(-50%);
+    width: min(420px, calc(100% - 20px));
+    background: var(--raised);
+    border: 1.5px solid var(--accent);
+    border-radius: 10px;
+    padding: 12px 14px;
+    display: flex; flex-direction: column; gap: 6px;
+    box-shadow: 0 4px 14px rgb(0 0 0 / .12);
+    font-size: 13px;
+  }
+  .tip span { color: var(--muted); }
   .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
   .thumb { width: 26px; height: 18px; object-fit: contain; background: var(--stage); border-radius: 3px; }
   .mrow.drow { grid-template-columns: 26px 1fr auto; }
@@ -414,6 +427,7 @@
       <select id="demoSel" class="btn ghost selectbtn" aria-label="Van de ejemplo">
         <option value="l2" selected>Ejemplo L2 (larga)</option>
         <option value="l1">Ejemplo L1 (corta)</option>
+        <option value="car">Auto real de código abierto</option>
       </select>
     </div>
   </header>
@@ -450,6 +464,14 @@
       </div>
     </div>
     <div id="hint" class="hint"><span id="hintText">Toca el carro para marcar el punto A</span><button id="cancelBtn" type="button" hidden>Cancelar</button></div>
+    <div id="orientTip" class="tip" hidden>
+      <b>Paso 1: ¿la van quedó recta?</b>
+      <span>Si quedó girada, enderézala antes de medir o poner diseños.</span>
+      <div class="btnrow">
+        <button id="tipAlign" class="btn small" type="button">Enderezar con 2 puntos</button>
+        <button id="tipOk" class="btn small ghost" type="button">Ya está recta</button>
+      </div>
+    </div>
     <div id="drop" class="drop" hidden>Suelta el archivo aquí</div>
     <div id="loading" class="loading" hidden>Cargando modelo…</div>
   </main>
@@ -463,6 +485,18 @@
         <div class="dim"><span>Ancho</span><b id="dimW">—</b></div>
       </div>
       <p>Medidas de la caja que envuelve al modelo. El ancho incluye los espejos.</p>
+    </section>
+
+    <section class="sec">
+      <h2>Orientar el escaneo</h2>
+      <p>El frente del carro debe apuntar a la flecha <b style="color:var(--cut)">FRENTE</b> y las ruedas deben quedar en el piso.</p>
+      <div class="btnrow">
+        <button class="btn small ghost" type="button" data-rot="y">Girar 90° (vertical)</button>
+        <button class="btn small ghost" type="button" data-rot="x">Girar 90° (X)</button>
+        <button class="btn small ghost" type="button" data-rot="z">Girar 90° (Z)</button>
+      </div>
+      <button id="alignBtn" class="btn small" type="button">Enderezar con 2 puntos</button>
+      <p>Para escaneos que quedaron girados en ángulo: toca el centro de la rueda delantera y luego el de la trasera del mismo lado. La app pone la van recta con el frente hacia la flecha.</p>
     </section>
 
     <section class="sec">
@@ -508,6 +542,7 @@
           <div class="field"><label for="dOp">Transparencia</label><input id="dOp" type="range" min="0.2" max="1" step="0.05"></div>
         </div>
         <label class="check"><input id="dKeep" type="checkbox" checked> Mantener proporción al estirar desde las esquinas</label>
+        <label class="check"><input id="dWrap" type="checkbox" checked> Pegar a la carrocería (sigue las curvas)</label>
         <div id="dInfo" class="info"></div>
         <div class="btnrow">
           <button id="dCenter" class="btn small ghost" type="button">Centrar</button>
@@ -553,17 +588,6 @@
       <p>Ábrela en Inkscape o Illustrator. Pon el diseño en la capa «Diseño»; la capa «Referencia» no se imprime.</p>
     </section>
 
-    <section class="sec">
-      <h2>Orientación del modelo</h2>
-      <p>El frente del carro debe apuntar a la flecha <b style="color:var(--cut)">FRENTE</b> y las ruedas deben quedar en el piso.</p>
-      <div class="btnrow">
-        <button class="btn small ghost" type="button" data-rot="y">Girar 90° (vertical)</button>
-        <button class="btn small ghost" type="button" data-rot="x">Girar 90° (X)</button>
-        <button class="btn small ghost" type="button" data-rot="z">Girar 90° (Z)</button>
-      </div>
-      <button id="alignBtn" class="btn small" type="button">Enderezar con 2 puntos</button>
-      <p>Para escaneos que quedaron girados en ángulo: toca el centro de la rueda delantera y luego el de la trasera del mismo lado. La app pone la van recta con el frente hacia la flecha.</p>
-    </section>
 
     <details class="sec">
       <summary>Cómo usarla</summary>
@@ -585,6 +609,7 @@
 <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/GLTFLoader.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/OBJLoader.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/PLYLoader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/geometries/DecalGeometry.js"></script>
 <script>
 (() => {
   'use strict';
@@ -729,110 +754,288 @@
   };
   let VAN = VANS.l2;
 
+  // ---------- Proyección de imágenes sobre superficies curvas (calcomanía / decal) ----------
+  // Recorta los triángulos que caen dentro de la caja del proyector (rápido, con arrays)
+  // y deja que DecalGeometry los corte y les asigne las coordenadas de la imagen.
+  function cropForDecal(mesh, projInv, hx, hy, hz) {
+    const g = mesh.geometry;
+    const pos = g.attributes.position;
+    if (!pos) return null;
+    if (!g.attributes.normal) g.computeVertexNormals();
+    const nor = g.attributes.normal;
+    mesh.updateMatrixWorld(true);
+    const M = new THREE.Matrix4().multiplyMatrices(projInv, mesh.matrixWorld);
+    const n = pos.count;
+    const local = new Float32Array(n * 3);
+    const v = new V3();
+    for (let i = 0; i < n; i++) {
+      v.fromBufferAttribute(pos, i).applyMatrix4(M);
+      local[i * 3] = v.x; local[i * 3 + 1] = v.y; local[i * 3 + 2] = v.z;
+    }
+    const idx = g.index;
+    const triCount = idx ? idx.count / 3 : n / 3;
+    const outP = [], outN = [];
+    const w = new V3(), nn = new V3();
+    for (let t = 0; t < triCount; t++) {
+      const a = idx ? idx.getX(t * 3) : t * 3, b = idx ? idx.getX(t * 3 + 1) : t * 3 + 1, c = idx ? idx.getX(t * 3 + 2) : t * 3 + 2;
+      const ax = local[a * 3], ay = local[a * 3 + 1], az = local[a * 3 + 2];
+      const bx = local[b * 3], by = local[b * 3 + 1], bz = local[b * 3 + 2];
+      const cx = local[c * 3], cy = local[c * 3 + 1], cz = local[c * 3 + 2];
+      if (Math.max(ax, bx, cx) < -hx || Math.min(ax, bx, cx) > hx) continue;
+      if (Math.max(ay, by, cy) < -hy || Math.min(ay, by, cy) > hy) continue;
+      if (Math.max(az, bz, cz) < -hz || Math.min(az, bz, cz) > hz) continue;
+      for (const k of [a, b, c]) {
+        w.fromBufferAttribute(pos, k).applyMatrix4(mesh.matrixWorld);
+        nn.fromBufferAttribute(nor, k).transformDirection(mesh.matrixWorld);
+        outP.push(w.x, w.y, w.z);
+        outN.push(nn.x, nn.y, nn.z);
+      }
+    }
+    if (!outP.length) return null;
+    const out = new THREE.BufferGeometry();
+    out.setAttribute('position', new THREE.Float32BufferAttribute(outP, 3));
+    out.setAttribute('normal', new THREE.Float32BufferAttribute(outN, 3));
+    return out;
+  }
+
+  // Proyecta una imagen (material) sobre las mallas `targets`. center/quat definen el proyector:
+  // su eje X = ancho de la imagen, Y = alto, Z = hacia quien mira. Devuelve las mallas creadas.
+  function projectDecal(targets, center, quat, size, material, facingMin = 0.08) {
+    const proj = new THREE.Matrix4().compose(center, quat, new V3(1, 1, 1));
+    const projInv = proj.clone().invert();
+    const toViewer = new V3(0, 0, 1).applyQuaternion(quat);
+    const euler = new THREE.Euler().setFromQuaternion(quat);
+    const identity = new THREE.Matrix4();
+    const out = [];
+    for (const m of targets) {
+      const cropped = cropForDecal(m, projInv, size.x / 2 * 1.01, size.y / 2 * 1.01, size.z / 2);
+      if (!cropped) continue;
+      const dg = new THREE.DecalGeometry({ geometry: cropped, matrixWorld: identity }, center, euler, size);
+      cropped.dispose();
+      // Descarta caras que miran de lado o hacia atrás (evita manchas estiradas).
+      const P = dg.attributes.position, N = dg.attributes.normal, UV = dg.attributes.uv;
+      const keepP = [], keepN = [], keepUV = [];
+      const nn = new V3();
+      for (let i = 0; i < P.count; i += 3) {
+        nn.set(0, 0, 0);
+        for (let k = 0; k < 3; k++) nn.x += N.getX(i + k), nn.y += N.getY(i + k), nn.z += N.getZ(i + k);
+        if (nn.normalize().dot(toViewer) < facingMin) continue;
+        for (let k = 0; k < 3; k++) {
+          keepP.push(P.getX(i + k), P.getY(i + k), P.getZ(i + k));
+          keepN.push(N.getX(i + k), N.getY(i + k), N.getZ(i + k));
+          keepUV.push(UV.getX(i + k), UV.getY(i + k));
+        }
+      }
+      dg.dispose();
+      if (!keepP.length) continue;
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute(keepP, 3));
+      g.setAttribute('normal', new THREE.Float32BufferAttribute(keepN, 3));
+      g.setAttribute('uv', new THREE.Float32BufferAttribute(keepUV, 2));
+      const mesh = new THREE.Mesh(g, material);
+      mesh.userData.noDecal = true;
+      out.push(mesh);
+    }
+    return out;
+  }
+
+  function decalTargets() {
+    const list = [];
+    if (content) content.traverse((o) => { if (o.isMesh && o.visible && !o.userData.noDecal) list.push(o); });
+    return list;
+  }
+
+  // ---------- Van de ejemplo con carrocería curva (Ford Transit Custom V362, medidas reales) ----------
+  function smoothKeys(keys) {
+    // Interpolación Catmull-Rom sobre puntos (u, valor) ordenados por u.
+    return (u) => {
+      if (u <= keys[0][0]) return keys[0][1];
+      const last = keys[keys.length - 1];
+      if (u >= last[0]) return last[1];
+      let i = 0;
+      while (u > keys[i + 1][0]) i++;
+      const p0 = keys[Math.max(0, i - 1)], p1 = keys[i], p2 = keys[i + 1], p3 = keys[Math.min(keys.length - 1, i + 2)];
+      const t = (u - p1[0]) / (p2[0] - p1[0]);
+      const m1 = (p2[1] - p0[1]) / Math.max(1e-6, p2[0] - p0[0]) * (p2[0] - p1[0]);
+      const m2 = (p3[1] - p1[1]) / Math.max(1e-6, p3[0] - p1[0]) * (p2[0] - p1[0]);
+      const t2 = t * t, t3 = t2 * t;
+      return (2 * t3 - 3 * t2 + 1) * p1[1] + (t3 - 2 * t2 + t) * m1 + (-2 * t3 + 3 * t2) * p2[1] + (t3 - t2) * m2;
+    };
+  }
+  const smoothstep = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+
   function buildDemoVan() {
     const { L, W, H, WB, R, FA } = VAN;
+    const RA = FA + WB, AR = 0.43;
     const g = new THREE.Group();
-    const bodyMat = new THREE.MeshStandardMaterial({ color: 0xf0f2f1, roughness: 0.45, metalness: 0.08 });
-    const darkMat = new THREE.MeshStandardMaterial({ color: 0x2a2f2d, roughness: 0.7 });
-    const glassMat = new THREE.MeshStandardMaterial({ color: 0x1c2630, roughness: 0.15, metalness: 0.3, side: THREE.DoubleSide });
-    const lightMat = new THREE.MeshStandardMaterial({ color: 0xdfe8ef, roughness: 0.2, emissive: 0x222222 });
-    const tailMat = new THREE.MeshStandardMaterial({ color: 0xa3182c, roughness: 0.3 });
-    const tyreMat = new THREE.MeshStandardMaterial({ color: 0x1a1c1b, roughness: 0.9 });
-    const rimMat = new THREE.MeshStandardMaterial({ color: 0x9aa3a0, roughness: 0.4, metalness: 0.5 });
 
-    const RA = FA + WB;
-    const AR = 0.42; // radio del paso de rueda
-    // Perfil lateral: u = distancia desde el paragolpes delantero, y = altura
-    const s = new THREE.Shape();
-    s.moveTo(0.02, 0.30);
-    s.lineTo(0.0, 0.62);
-    s.quadraticCurveTo(0.02, 0.93, 0.18, 1.0);
-    s.lineTo(0.92, 1.13);
-    s.lineTo(1.72, 1.90);
-    s.quadraticCurveTo(1.80, H, 1.95, H);
-    s.lineTo(L - 0.08, H);
-    s.quadraticCurveTo(L, H, L, H - 0.08);
-    s.lineTo(L, 0.36);
-    s.lineTo(L - 0.05, 0.30);
-    s.lineTo(RA + AR, 0.30);
-    s.absarc(RA, R, AR, 0, Math.PI, false);
-    s.lineTo(FA + AR, 0.30);
-    s.absarc(FA, R, AR, 0, Math.PI, false);
-    s.lineTo(0.02, 0.30);
-
-    const depth = W - 0.08;
-    const body = new THREE.ExtrudeGeometry(s, { depth, bevelEnabled: true, bevelThickness: 0.04, bevelSize: 0.03, bevelSegments: 3, curveSegments: 20 });
-    body.rotateY(Math.PI);                 // u -> -x
-    body.computeBoundingBox();
-    let bb = body.boundingBox;
-    const size = bb.getSize(new V3());
-    body.translate(-(bb.min.x + bb.max.x) / 2, 0, -(bb.min.z + bb.max.z) / 2);
-    body.scale(L / size.x, H / bb.max.y, W / size.z);
-    body.computeVertexNormals();
-    g.add(new THREE.Mesh(body, bodyMat));
-
-    const X = (u) => L / 2 - u;             // u (desde el frente) -> x del mundo
-
-    // Ventanas laterales de cabina
-    const pane = [[1.06, 1.22], [2.28, 1.22], [2.28, 1.84], [1.70, 1.84]];
-    for (const side of [-1, 1]) {
-      const ps = new THREE.Shape(pane.map(([u, y]) => new THREE.Vector2(X(u), y)));
-      const pg = new THREE.ShapeGeometry(ps);
-      pg.translate(0, 0, side * (W / 2 + 0.004));
-      g.add(new THREE.Mesh(pg, glassMat));
-    }
-    // Parabrisas
-    const du = 0.8, dy = 0.77, wl = Math.hypot(du, dy);
-    const ws = new THREE.PlaneGeometry(W * 0.84, wl);
-    ws.rotateY(Math.PI / 2);
-    const th = Math.atan2(du, dy);
-    ws.rotateZ(th);
-    ws.translate(X(1.32) + Math.cos(th) * 0.012, 1.515 + Math.sin(th) * 0.012, 0);
-    g.add(new THREE.Mesh(ws, glassMat));
-
-    const box = (w, h, d, mat, x, y, z) => {
-      const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
-      m.position.set(x, y, z);
-      g.add(m);
-      return m;
+    const top = smoothKeys([
+      [0, 0.60], [0.04, 0.84], [0.16, 0.97], [0.45, 1.05], [0.90, 1.13], [1.30, 1.50], [1.66, 1.86],
+      [1.95, H - 0.005], [2.3, H], [L - 0.30, H], [L - 0.08, H - 0.02], [L, H - 0.10],
+    ]);
+    const half = smoothKeys([[0, W / 2 - 0.16], [0.12, W / 2 - 0.07], [0.45, W / 2 - 0.015], [0.9, W / 2], [L - 0.2, W / 2], [L, W / 2 - 0.02]]);
+    const bottom = (u) => {
+      let b = 0.30 + 0.05 * smoothstep(0.25, 0, u) + 0.04 * smoothstep(L - 0.25, L, u);
+      for (const ax of [FA, RA]) {
+        const d = Math.abs(u - ax);
+        if (d < AR) b = Math.max(b, R + Math.sqrt(AR * AR - d * d) * 0.93);
+      }
+      return b;
     };
-    // Paragolpes, parrilla, faros, pilotos
-    box(0.16, 0.25, W * 0.96, darkMat, L / 2 - 0.085, 0.43, 0);
-    box(0.14, 0.2, W * 0.96, darkMat, -L / 2 + 0.075, 0.42, 0);
-    box(0.05, 0.2, 1.0, darkMat, L / 2 - 0.03, 0.72, 0);
-    for (const sd of [-1, 1]) {
-      box(0.12, 0.1, 0.34, lightMat, L / 2 - 0.07, 0.88, sd * 0.66);
-      box(0.026, 0.5, 0.1, tailMat, -L / 2 + 0.014, 1.15, sd * (W / 2 - 0.07));
-      // Espejos: ancho total con espejos = 2272 mm
-      box(0.08, 0.22, 0.16, darkMat, X(1.0), 1.25, sd * (W / 2 + 0.063));
-      // Manijas
-      box(0.14, 0.035, 0.02, darkMat, X(2.12), 1.07, sd * (W / 2 + 0.01));
-      box(0.14, 0.035, 0.02, darkMat, X(2.5), 1.07, sd * (W / 2 + 0.01));
-    }
-    // Juntas de puertas (delantera y corredera)
-    const seams = [];
-    for (const sd of [-1, 1]) {
-      const z = sd * (W / 2 + 0.003);
-      seams.push(X(2.30), 0.40, z, X(2.30), 1.86, z);
-      seams.push(X(3.40), 0.40, z, X(3.40), 1.86, z);
-      seams.push(X(1.02), 0.64, z, X(1.02), 1.14, z);
-    }
-    const sg = new THREE.BufferGeometry();
-    sg.setAttribute('position', new THREE.Float32BufferAttribute(seams, 3));
-    g.add(new THREE.LineSegments(sg, new THREE.LineBasicMaterial({ color: 0x3a403e })));
 
-    // Ruedas 215/65 R16
-    const tyre = new THREE.CylinderGeometry(R, R, 0.215, 36);
+    // Estaciones a lo largo del carro y puntos alrededor de cada sección (superelipse redondeada).
+    const NS = 220, NR = 72;
+    const pos = [];
+    const us = [];
+    for (let i = 0; i <= NS; i++) us.push(L * (1 - Math.cos(Math.PI * i / NS)) / 2 * 0.15 + L * i / NS * 0.85);
+    for (const u of us) {
+      const t = Math.min(H, top(u)), b = bottom(u), hw = half(u);
+      const cyc = (t + b) / 2, hh = (t - b) / 2;
+      const nTop = 3.0 + 1.2 * smoothstep(0.6, 1.4, u) + 1.2 * smoothstep(1.4, 2.4, u);
+      const nBot = 9;
+      for (let j = 0; j < NR; j++) {
+        const phi = -Math.PI / 2 + (j / NR) * Math.PI * 2;
+        const c = Math.cos(phi), s = Math.sin(phi);
+        const n = s > 0 ? nTop : nBot;
+        let x = hw * Math.sign(c) * Math.pow(Math.abs(c), 2 / n);
+        const y = cyc + hh * Math.sign(s) * Math.pow(Math.abs(s), 2 / n);
+        // «Tumblehome»: la parte alta de la cabina y la carga se inclina hacia adentro.
+        x *= 1 - 0.075 * smoothstep(1.1, H, y) * smoothstep(0.9, 1.6, u);
+        pos.push(L / 2 - u, y, x);
+      }
+    }
+    const idx = [];
+    for (let i = 0; i < NS; i++) for (let j = 0; j < NR; j++) {
+      const a = i * NR + j, b = i * NR + (j + 1) % NR, c = (i + 1) * NR + j, d = (i + 1) * NR + (j + 1) % NR;
+      idx.push(a, b, c, b, d, c);
+    }
+    // Tapas delantera y trasera
+    for (const [ring, flip] of [[0, true], [NS, false]]) {
+      const base = pos.length / 3;
+      let sx = 0, sy = 0, sz = 0;
+      for (let j = 0; j < NR; j++) { const k = (ring * NR + j) * 3; sx += pos[k]; sy += pos[k + 1]; sz += pos[k + 2]; }
+      pos.push(sx / NR, sy / NR, sz / NR);
+      for (let j = 0; j < NR; j++) {
+        const a = ring * NR + j, b = ring * NR + (j + 1) % NR;
+        if (flip) idx.push(base, b, a); else idx.push(base, a, b);
+      }
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    geo.setIndex(idx);
+    geo.computeVertexNormals();
+    const body = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: 0xf2f4f3, roughness: 0.32, metalness: 0.15 }));
+    g.add(body);
+    body.updateMatrixWorld(true);
+
+    // Detalles pintados sobre la carrocería con la misma técnica de calcomanía:
+    // vidrios, juntas de puertas, manijas, faros, parrilla y pilotos.
+    const decalMat = (cv) => {
+      const t = new THREE.CanvasTexture(cv);
+      t.encoding = THREE.sRGBEncoding;
+      t.anisotropy = 4;
+      return new THREE.MeshStandardMaterial({ map: t, transparent: true, depthWrite: false, roughness: 0.25, metalness: 0.1, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+    };
+    const PX = 400; // píxeles por metro en las texturas de detalle
+    const canvasFor = (wm, hm) => { const cv = document.createElement('canvas'); cv.width = Math.round(wm * PX); cv.height = Math.round(hm * PX); return cv; };
+    const add = (meshes) => meshes.forEach((m) => g.add(m));
+
+    // Lados: vidrio de cabina, juntas, manijas y moldura inferior
+    const u0 = 0.0, u1 = L, y0 = 0.28, y1 = H + 0.02;
+    for (const side of ['left', 'right']) {
+      const cv = canvasFor(u1 - u0, y1 - y0);
+      const c2 = cv.getContext('2d');
+      const X = (u) => ((side === 'left' ? u - u0 : u1 - u) / (u1 - u0)) * cv.width;
+      const Y = (y) => (1 - (y - y0) / (y1 - y0)) * cv.height;
+      c2.fillStyle = '#18222b';
+      c2.beginPath();
+      [[1.10, 1.22], [2.30, 1.22], [2.30, 1.84], [1.80, 1.86], [1.70, 1.80]].forEach(([u, y], i) => (i ? c2.lineTo(X(u), Y(y)) : c2.moveTo(X(u), Y(y))));
+      c2.closePath(); c2.fill();
+      c2.strokeStyle = '#3b4441'; c2.lineWidth = 3;
+      for (const [u, ya, yb] of [[2.34, 0.40, 1.88], [3.42, 0.40, 1.88], [1.04, 0.66, 1.16]]) { c2.beginPath(); c2.moveTo(X(u), Y(ya)); c2.lineTo(X(u), Y(yb)); c2.stroke(); }
+      c2.beginPath(); c2.moveTo(X(2.34), Y(1.88)); c2.lineTo(X(3.42), Y(1.88)); c2.stroke();
+      c2.fillStyle = '#2a302e';
+      for (const u of [2.14, 2.50]) c2.fillRect(X(u) - (side === 'left' ? 0 : 0.14 * PX), Y(1.08), 0.14 * PX, 0.035 * PX);
+      c2.fillRect(0, Y(0.42), cv.width, Y(0.30) - Y(0.42));
+      const f = new V3(0, 0, side === 'left' ? 1 : -1), up = new V3(0, 1, 0);
+      const r = new V3().crossVectors(f, up);
+      const q = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(r, up, f.clone().negate()));
+      const center = new V3(L / 2 - (u0 + u1) / 2, (y0 + y1) / 2, side === 'left' ? -W / 2 + 0.3 : W / 2 - 0.3);
+      add(projectDecal([body], center, q, new V3(u1 - u0, y1 - y0, 0.9), decalMat(cv), 0.25));
+    }
+    // Parabrisas (proyectado de frente al vidrio)
+    {
+      const du = 0.76, dy = 0.73, th = Math.atan2(du, dy);
+      const cv = canvasFor(W, 1.1);
+      const c2 = cv.getContext('2d');
+      c2.fillStyle = '#18222b';
+      const m = 0.09 * PX;
+      c2.beginPath();
+      c2.moveTo(m * 1.6, m); c2.lineTo(cv.width - m * 1.6, m); c2.lineTo(cv.width - m * 0.6, cv.height - m); c2.lineTo(m * 0.6, cv.height - m); c2.closePath(); c2.fill();
+      const zA = new V3(Math.cos(th), Math.sin(th), 0), yA = new V3(-Math.sin(th), Math.cos(th), 0), xA = new V3(0, 0, -1);
+      const q = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(xA, yA, zA));
+      const uc = 1.30;
+      add(projectDecal([body], new V3(L / 2 - uc, top(uc) - 0.05, 0), q, new V3(W, 1.1, 0.6), decalMat(cv), 0.2));
+    }
+    // Frente: parrilla, faros y paragolpes
+    {
+      const wm = W, hm = 0.9, yb = 0.28;
+      const cv = canvasFor(wm, hm);
+      const c2 = cv.getContext('2d');
+      const Y = (y) => (1 - (y - yb) / hm) * cv.height, Z = (z) => (0.5 - z / wm) * cv.width; // mirando de frente: +z a la izquierda
+      c2.fillStyle = '#23292b';
+      c2.fillRect(Z(0.55), Y(0.86), Z(-0.55) - Z(0.55), Y(0.60) - Y(0.86));
+      c2.fillRect(0, Y(0.52), cv.width, Y(0.30) - Y(0.52));
+      c2.fillStyle = '#dfe7ee';
+      for (const s of [-1, 1]) { const a = Z(s * 0.62), b = Z(s * 0.95); c2.fillRect(Math.min(a, b), Y(0.99), Math.abs(b - a), Y(0.86) - Y(0.99)); }
+      const f = new V3(-1, 0, 0), up = new V3(0, 1, 0), r = new V3().crossVectors(f, up);
+      const q = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(r, up, f.clone().negate()));
+      add(projectDecal([body], new V3(L / 2 - 0.2, yb + hm / 2, 0), q, new V3(wm, hm, 0.6), decalMat(cv), 0.3));
+    }
+    // Atrás: pilotos, división de puertas y paragolpes
+    {
+      const wm = W, hm = H - 0.26, yb = 0.28;
+      const cv = canvasFor(wm, hm);
+      const c2 = cv.getContext('2d');
+      const Y = (y) => (1 - (y - yb) / hm) * cv.height, Z = (z) => (0.5 + z / wm) * cv.width;
+      c2.fillStyle = '#9e1a2c';
+      for (const s of [-1, 1]) { const a = Z(s * (W / 2 - 0.04)), b = Z(s * (W / 2 - 0.13)); c2.fillRect(Math.min(a, b), Y(1.45), Math.abs(b - a), Y(0.85) - Y(1.45)); }
+      c2.strokeStyle = '#3b4441'; c2.lineWidth = 3;
+      c2.beginPath(); c2.moveTo(Z(0), Y(0.45)); c2.lineTo(Z(0), Y(H - 0.06)); c2.stroke();
+      c2.fillStyle = '#23292b';
+      c2.fillRect(0, Y(0.50), cv.width, Y(0.30) - Y(0.50));
+      const f = new V3(1, 0, 0), up = new V3(0, 1, 0), r = new V3().crossVectors(f, up);
+      const q = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(r, up, f.clone().negate()));
+      add(projectDecal([body], new V3(-L / 2 + 0.2, yb + hm / 2, 0), q, new V3(wm, hm, 0.6), decalMat(cv), 0.3));
+    }
+
+    const darkMat = new THREE.MeshStandardMaterial({ color: 0x2a2f2d, roughness: 0.6 });
+    // Espejos: ancho total con espejos = 2272 mm
+    for (const sd of [-1, 1]) {
+      const m = new THREE.Mesh(new THREE.SphereGeometry(1, 24, 16), darkMat);
+      m.scale.set(0.07, 0.12, 0.075);
+      m.position.set(L / 2 - 1.02, 1.26, sd * (W / 2 + 0.068));
+      g.add(m);
+    }
+    // Ruedas 215/65 R16 con neumático redondeado
+    const tyreProfile = [];
+    const tw = 0.215 / 2, rr = 0.055;
+    tyreProfile.push(new THREE.Vector2(R * 0.62, -tw));
+    for (let i = 0; i <= 8; i++) { const a = -Math.PI / 2 + (i / 8) * Math.PI / 2; tyreProfile.push(new THREE.Vector2(R - rr + Math.cos(a) * rr, -tw + rr + Math.sin(a) * rr)); }
+    for (let i = 0; i <= 8; i++) { const a = (i / 8) * Math.PI / 2; tyreProfile.push(new THREE.Vector2(R - rr + Math.cos(a) * rr, tw - rr + Math.sin(a) * rr)); }
+    tyreProfile.push(new THREE.Vector2(R * 0.62, tw));
+    const tyre = new THREE.LatheGeometry(tyreProfile, 48);
     tyre.rotateX(Math.PI / 2);
-    const rim = new THREE.CylinderGeometry(R * 0.6, R * 0.6, 0.22, 24);
+    const rim = new THREE.CylinderGeometry(R * 0.62, R * 0.62, 0.19, 36);
     rim.rotateX(Math.PI / 2);
+    const tyreMat = new THREE.MeshStandardMaterial({ color: 0x1a1c1b, roughness: 0.9, side: THREE.DoubleSide });
+    const rimMat = new THREE.MeshStandardMaterial({ color: 0xa7b0ad, roughness: 0.35, metalness: 0.6 });
     for (const u of [FA, RA]) for (const sd of [-1, 1]) {
       const t = new THREE.Mesh(tyre, tyreMat);
-      t.position.set(X(u), R, sd * (W / 2 - 0.14));
-      g.add(t);
+      t.position.set(L / 2 - u, R, sd * (W / 2 - 0.15));
       const r2 = new THREE.Mesh(rim, rimMat);
       r2.position.copy(t.position);
-      g.add(r2);
+      g.add(t, r2);
     }
     return g;
   }
@@ -877,13 +1080,13 @@
 
   function ground() {
     content.updateMatrixWorld(true);
-    const b = new THREE.Box3().setFromObject(content);
+    const b = new THREE.Box3().setFromObject(content, true);
     const c = b.getCenter(new V3());
     content.position.x -= c.x;
     content.position.z -= c.z;
     content.position.y -= b.min.y;
     content.updateMatrixWorld(true);
-    modelBox.setFromObject(content);
+    modelBox.setFromObject(content, true);
     const s = modelBox.getSize(new V3());
     modelSize = Math.max(s.x, s.y, s.z) || 1;
     rebuildHelpers();
@@ -911,7 +1114,7 @@
     content.rotateOnWorldAxis(ax, angle);
     content.updateMatrixWorld(true);
     // re-apoyar en el piso
-    const b = new THREE.Box3().setFromObject(content);
+    const b = new THREE.Box3().setFromObject(content, true);
     const c = b.getCenter(new V3());
     content.position.x -= c.x;
     content.position.z -= c.z;
@@ -954,7 +1157,7 @@
       const wrap = new THREE.Group();
       wrap.add(obj);
       setContent(wrap, file.name + ' · escaneo');
-      toast('Modelo cargado. Revisa la orientación y calibra con una medida real.');
+      $('#orientTip').hidden = false;
     } catch (e) {
       toast('No se pudo abrir el archivo: ' + (e && e.message ? e.message : 'formato no válido') + '. Exporta en GLB desde Scaniverse.');
     } finally {
@@ -968,7 +1171,34 @@
   stage.addEventListener('dragleave', (e) => { if (e.target === stage || e.target.id === 'drop') $('#drop').hidden = true; });
   stage.addEventListener('drop', (e) => { e.preventDefault(); $('#drop').hidden = true; loadFile(e.dataTransfer.files[0]); });
 
+  // Modelo 3D abierto con carrocería curva real: «Car Concept» (Khronos glTF Sample Assets),
+  // © 2024 Darmstadt Graphics Group GmbH, modelo y texturas de Eric Chadwick, licencia CC BY 4.0.
+  async function loadOpenCar() {
+    $('#loading').hidden = false;
+    try {
+      const res = await fetch('models/carconcept.glb');
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const buf = await res.arrayBuffer();
+      const gltf = await new Promise((ok, ko) => new THREE.GLTFLoader().parse(buf, '', ok, ko));
+      const car = gltf.scene;
+      car.rotation.y = CAR_YAW;               // el modelo viene mirando a lo largo de Z; lo giramos al frente (+X)
+      const wrap = new THREE.Group();
+      wrap.add(car);
+      setContent(wrap, 'Car Concept · modelo abierto (CC BY 4.0, Eric Chadwick / DGG)');
+      addQuickMeasures(true);
+      select(state.measures[0].id);
+      addSampleDesign('car');
+      toast('Modelo abierto «Car Concept» (CC BY 4.0). Mira cómo el diseño sigue las curvas.');
+    } catch (e) {
+      toast('No se pudo cargar el auto de muestra (' + (e && e.message ? e.message : 'error') + ').');
+    } finally {
+      $('#loading').hidden = true;
+    }
+  }
+  const CAR_YAW = Math.PI / 2;
+
   function loadDemo() {
+    if ($('#demoSel').value === 'car') { loadOpenCar(); return; }
     VAN = VANS[$('#demoSel').value] || VANS.l2;
     setContent(buildDemoVan(), VAN.label);
     demoMeasures();
@@ -1232,6 +1462,8 @@
     setMode('measure');
     toast('Van enderezada (' + nf.format(a * 180 / Math.PI) + '°). Revisa el largo total y calibra.');
   }
+  $('#tipOk').addEventListener('click', () => { $('#orientTip').hidden = true; });
+  $('#tipAlign').addEventListener('click', () => { $('#orientTip').hidden = true; $('#alignBtn').click(); });
   $('#alignBtn').addEventListener('click', () => {
     if (!content) return;
     state.alignA = null;
@@ -1546,7 +1778,43 @@
     d.mesh.quaternion.copy(q);
     d.mesh.scale.set(d.w, d.h, 1);
     d.mesh.material.opacity = d.opacity;
+    d.decalMat.opacity = d.opacity;
+    if (recomputeDepth) rebuildDecal(d, f, q);
+    else showFlat(d);
     dirty = true;
+  }
+
+  function clearDecal(d) {
+    for (const m of d.decals) { designGroup.remove(m); m.geometry.dispose(); }
+    d.decals = [];
+  }
+  function showFlat(d) {
+    for (const m of d.decals) m.visible = false;
+    d.mesh.visible = true;
+  }
+  // Pega la imagen sobre la carrocería siguiendo sus curvas (proyección desde la vista de esa cara).
+  function rebuildDecal(d, f, q) {
+    clearDecal(d);
+    d.mesh.visible = true;
+    if (!d.wrap) return;
+    const { ex } = viewFrame(d.view);
+    let along = 0;
+    const qq = new V3();
+    for (let i = 0; i < 8; i++) {
+      qq.set(i & 1 ? modelBox.max.x : modelBox.min.x, i & 2 ? modelBox.max.y : modelBox.min.y, i & 4 ? modelBox.max.z : modelBox.min.z);
+      along = Math.max(along, Math.abs(qq.dot(f)));
+    }
+    const dz = Math.min(unitsOf(150), Math.max(unitsOf(40), along * 2 * 0.6));
+    const center = d.mesh.position.clone().addScaledVector(f, dz * 0.3);
+    let meshes = [];
+    try { meshes = projectDecal(decalTargets(), center, q, new V3(d.w, d.h, dz), d.decalMat, 0.12); } catch (e) { meshes = []; }
+    for (const m of meshes) {
+      m.renderOrder = 6;
+      m.userData.designId = d.id;
+      designGroup.add(m);
+    }
+    d.decals = meshes;
+    if (meshes.length) d.mesh.visible = false;
   }
 
   // Caja que ocupa el diseño girado, medida desde el borde izquierdo y de abajo de la cara.
@@ -1561,8 +1829,9 @@
   function addDesign(opts) {
     const tex = makeTexture(opts.img);
     const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, side: THREE.DoubleSide, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 });
-    const d = Object.assign({ id: ++dSeq, rot: 0, opacity: 1, depth: null }, opts);
+    const d = Object.assign({ id: ++dSeq, rot: 0, opacity: 1, depth: null, wrap: true, decals: [] }, opts);
     delete d.img;
+    d.decalMat = new THREE.MeshStandardMaterial({ map: tex, transparent: true, depthWrite: false, roughness: 0.38, metalness: 0.05, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 });
     d.mesh = new THREE.Mesh(planeGeo, mat);
     d.mesh.renderOrder = 5;
     d.mesh.userData.designId = d.id;
@@ -1601,7 +1870,7 @@
   $('#imgInput').addEventListener('change', (e) => { importDesign(e.target.files[0]); e.target.value = ''; });
 
   // Diseño de muestra para la van de ejemplo (se reemplaza importando tu imagen).
-  function addSampleDesign() {
+  function addSampleDesign(place) {
     const cv = document.createElement('canvas');
     cv.width = 1600; cv.height = 560;
     const g = cv.getContext('2d');
@@ -1617,8 +1886,16 @@
     g.fillText('+33 0 00 00 00 00', 86, 470);
     const url = cv.toDataURL('image/png');
     const { ex } = viewFrame('left');
-    const w = unitsOf(270), h = w * 560 / 1600;
-    const d = addDesign({ name: 'Ejemplo de diseño', url, img: cv, view: 'left', sr: ex.minR + unitsOf(235) + w / 2, su: ex.minU + unitsOf(75) + h / 2, w, h });
+    const vw = ex.maxR - ex.minR, vh = ex.maxU - ex.minU;
+    let w, h, sr, su;
+    if (place === 'car') {
+      w = vw * 0.36; h = w * 560 / 1600;
+      sr = ex.minR + vw * 0.5; su = ex.minU + vh * 0.5;
+    } else {
+      w = unitsOf(270); h = w * 560 / 1600;
+      sr = ex.minR + unitsOf(235) + w / 2; su = ex.minU + unitsOf(75) + h / 2;
+    }
+    const d = addDesign({ name: 'Ejemplo de diseño', url, img: cv, view: 'left', sr, su, w, h });
     selectDesign(d.id, true);
   }
 
@@ -1627,8 +1904,10 @@
     if (i < 0) return;
     const d = designs[i];
     designGroup.remove(d.mesh);
+    clearDecal(d);
     d.mesh.material.map.dispose();
     d.mesh.material.dispose();
+    d.decalMat.dispose();
     designs.splice(i, 1);
     if (selDesignId === id) selDesignId = null;
     renderDesigns();
@@ -1650,7 +1929,7 @@
   function tapDesign(e) {
     setNdc(e);
     raycaster.setFromCamera(ndc, camera);
-    const hit = raycaster.intersectObjects(designGroup.children, false)[0];
+    const hit = raycaster.intersectObjects(designGroup.children.filter((o) => o.visible), false)[0];
     if (hit) selectDesign(hit.object.userData.designId);
   }
 
@@ -1693,6 +1972,7 @@
     set('#dY', cmOf(rr.bottom).toFixed(1));
     set('#dRot', String(Math.round(d.rot * 10) / 10));
     set('#dOp', String(d.opacity));
+    $('#dWrap').checked = d.wrap;
     const [lx, ly] = EDGE_LABELS[d.view];
     $('#dXLabel').textContent = lx;
     $('#dYLabel').textContent = ly;
@@ -1756,8 +2036,10 @@
     const d = selDesign(); if (!d) return;
     d.opacity = parseFloat($('#dOp').value);
     d.mesh.material.opacity = d.opacity;
+    d.decalMat.opacity = d.opacity;
     dirty = true;
   });
+  $('#dWrap').addEventListener('change', onDesignInput((d) => { d.wrap = $('#dWrap').checked; }));
   $('#tplBleed').addEventListener('input', () => { const d = selDesign(); if (d) fillDesignFields(d); });
   $('#dCenter').addEventListener('click', onDesignInput((d) => {
     const { ex } = viewFrame(d.view);

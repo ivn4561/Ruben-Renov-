@@ -8,7 +8,8 @@ se abre en el navegador del iPhone o del computador.
 
 ## Qué hace
 
-- **Muestra el carro en 3D**: una van de ejemplo con las medidas de fábrica de la Transit Custom (L2 o L1),
+- **Muestra el carro en 3D**: una van de ejemplo con carrocería curva y las medidas de fábrica de la
+  Transit Custom (L2 o L1), un auto real de código abierto con curvas (para probar cómo se pega el diseño),
   o tu propio escaneo (`.glb`, `.gltf`, `.obj`, `.ply`).
 - **Mide de un punto a otro**: tocas el punto A y luego el punto B, y la app muestra la distancia en cm.
   Los puntos se pueden arrastrar para ajustarlos.
@@ -28,6 +29,8 @@ se abre en el navegador del iPhone o del computador.
   - las esquinas la agrandan sin deformarla;
   - los puntos de los lados la estiran solo a lo ancho o a lo alto;
   - el punto de arriba la gira (se ajusta solo a 0°, 15°, 30°…).
+- **Pega el diseño a la carrocería**: la imagen sigue las curvas de la chapa (techo, esquinas, guardabarros),
+  como quedaría el vinilo. Se puede apagar con «Pegar a la carrocería» para verla como lámina plana.
 - **Te da las medidas del diseño**: ancho y alto en cm, distancia al frente y al piso, márgenes,
   tamaño con sobrante y m² de vinilo aproximados. También se pueden escribir los valores a mano.
 - **«Copiar al otro lado»**: pone el mismo diseño en el lado derecho, a la misma distancia del frente.
@@ -83,14 +86,23 @@ Estas son medidas públicas de catálogo; verifícalas siempre en el vehículo a
 - Cada imagen se guarda con su **cara del carro** (izquierda, derecha, atrás, frente o techo),
   su **posición**, su **tamaño** y su **giro**, en las mismas unidades que el modelo 3D.
   Por eso, al calibrar la escala, las medidas del diseño en cm también se corrigen.
-- En 3D, la imagen es una lámina plana (una textura de Three.js). La app busca la carrocería detrás de
-  la imagen con rayos (raycasting) y apoya la lámina encima de la chapa.
+- En 3D, la imagen se **proyecta sobre la carrocería** como una calcomanía (técnica «decal», con
+  `DecalGeometry` de Three.js): la app toma los triángulos de la chapa que quedan detrás de la imagen,
+  los recorta al tamaño del diseño y les pega la imagen. Mientras arrastras se ve como lámina plana (es más
+  rápido) y al soltar se vuelve a pegar sobre las curvas.
+- La proyección se hace desde la vista de esa cara (lado, frente, atrás o techo). Por eso la plantilla SVG,
+  que es esa misma vista plana, coincide con lo que ves pegado en 3D.
 - El recuadro con puntos es HTML encima del visor. Al arrastrar, la app convierte los píxeles de la pantalla
   a centímetros reales según el zoom de la vista plana. El lado opuesto al punto que arrastras queda fijo.
 - Al exportar, la misma posición y el mismo tamaño se escriben en el SVG en milímetros a la escala elegida.
   Por eso lo que ves en la app coincide con la plantilla.
-- La imagen es plana: en los lados de la van, que son casi planos, coincide muy bien. En zonas curvas
-  (frente, esquinas) el instalador la adapta con calor y el sobrante.
+- En curvas muy cerradas (esquinas del paragolpes, pasos de rueda) el vinilo real se estira un poco;
+  el instalador lo ajusta con calor y el sobrante.
+
+## Modelo de código abierto incluido
+
+`app/models/carconcept.glb` es el «Car Concept» de Khronos (CC BY 4.0, Eric Chadwick / Darmstadt Graphics
+Group). Ver [app/models/CREDITS.md](app/models/CREDITS.md).
 
 ## Uso técnico
 
