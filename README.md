@@ -8,7 +8,7 @@ se abre en el navegador del iPhone o del computador.
 
 ## Qué hace
 
-- **Muestra el carro en 3D**: una van de ejemplo con las medidas de fábrica de la Transit Custom L1H1,
+- **Muestra el carro en 3D**: una van de ejemplo con las medidas de fábrica de la Transit Custom (L2 o L1),
   o tu propio escaneo (`.glb`, `.gltf`, `.obj`, `.ply`).
 - **Mide de un punto a otro**: tocas el punto A y luego el punto B, y la app muestra la distancia en cm.
   Los puntos se pueden arrastrar para ajustarlos.
@@ -22,8 +22,16 @@ se abre en el navegador del iPhone o del computador.
   - el sobrante de corte;
   - tus medidas;
   - una barra de 1 m para comprobar la escala;
-  - una capa vacía «Diseño» para poner el arte encima.
-- **Exporta las medidas en CSV** (se abre en Excel).
+  - la capa «Diseño», con tus imágenes ya colocadas a escala.
+- **Importa tu diseño** (PNG, JPG o SVG) y lo pone sobre la carrocería. En modo **Diseño**, desde una vista plana:
+  - arrastras la imagen para moverla;
+  - las esquinas la agrandan sin deformarla;
+  - los puntos de los lados la estiran solo a lo ancho o a lo alto;
+  - el punto de arriba la gira (se ajusta solo a 0°, 15°, 30°…).
+- **Te da las medidas del diseño**: ancho y alto en cm, distancia al frente y al piso, márgenes,
+  tamaño con sobrante y m² de vinilo aproximados. También se pueden escribir los valores a mano.
+- **«Copiar al otro lado»**: pone el mismo diseño en el lado derecho, a la misma distancia del frente.
+- **Exporta las medidas en CSV** (se abre en Excel), con las medidas y la posición de cada diseño.
 
 ## Paso a paso
 
@@ -66,6 +74,20 @@ Estas son medidas públicas de catálogo; verifícalas siempre en el vehículo a
   deja 10 cm o más. El instalador recorta el sobrante sobre el carro.
 - Antes de imprimir, confirma con cinta 2 o 3 medidas clave de cada panel.
 - Evita poner textos o logos importantes sobre manijas, juntas de puertas o la línea de la puerta corredera.
+
+## Cómo funciona el diseño por dentro
+
+- Cada imagen se guarda con su **cara del carro** (izquierda, derecha, atrás, frente o techo),
+  su **posición**, su **tamaño** y su **giro**, en las mismas unidades que el modelo 3D.
+  Por eso, al calibrar la escala, las medidas del diseño en cm también se corrigen.
+- En 3D, la imagen es una lámina plana (una textura de Three.js). La app busca la carrocería detrás de
+  la imagen con rayos (raycasting) y apoya la lámina encima de la chapa.
+- El recuadro con puntos es HTML encima del visor. Al arrastrar, la app convierte los píxeles de la pantalla
+  a centímetros reales según el zoom de la vista plana. El lado opuesto al punto que arrastras queda fijo.
+- Al exportar, la misma posición y el mismo tamaño se escriben en el SVG en milímetros a la escala elegida.
+  Por eso lo que ves en la app coincide con la plantilla.
+- La imagen es plana: en los lados de la van, que son casi planos, coincide muy bien. En zonas curvas
+  (frente, esquinas) el instalador la adapta con calor y el sobrante.
 
 ## Uso técnico
 
