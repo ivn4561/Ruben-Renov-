@@ -1176,7 +1176,7 @@
   async function loadOpenCar() {
     $('#loading').hidden = false;
     try {
-      const res = await fetch('models/carconcept.glb');
+      const res = await fetch('models/carconcept.json');
       if (!res.ok) throw new Error('HTTP ' + res.status);
       const buf = await res.arrayBuffer();
       const gltf = await new Promise((ok, ko) => new THREE.GLTFLoader().parse(buf, '', ok, ko));

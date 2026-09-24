@@ -101,7 +101,7 @@ Estas son medidas públicas de catálogo; verifícalas siempre en el vehículo a
 
 ## Modelo de código abierto incluido
 
-`app/models/carconcept.glb` es el «Car Concept» de Khronos (CC BY 4.0, Eric Chadwick / Darmstadt Graphics
+`app/models/carconcept.json` (glTF con los datos incluidos) es el «Car Concept» de Khronos (CC BY 4.0, Eric Chadwick / Darmstadt Graphics
 Group). Ver [app/models/CREDITS.md](app/models/CREDITS.md).
 
 ## Uso técnico

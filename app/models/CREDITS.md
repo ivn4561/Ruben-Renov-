@@ -1,6 +1,6 @@
 # Créditos de modelos 3D
 
-## carconcept.glb
+## carconcept.json
 
 «Car Concept», de [Khronos glTF Sample Assets](https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/CarConcept).
 
@@ -11,4 +11,5 @@
 
 Cambios hechos para esta app, con [glTF-Transform](https://gltf-transform.dev/): se redujeron las texturas,
 se simplificó la malla al 50 % y se cuantizaron los vértices (KHR_mesh_quantization),
-para bajar el archivo de 11,8 MB a 6,6 MB.
+para bajar el archivo de 11,8 MB a 6,6 MB. Se guarda como glTF de texto
+(JSON con los datos en base64) para que la página publicada pueda servirlo.
