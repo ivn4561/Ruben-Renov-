@@ -104,6 +104,15 @@ Estas son medidas públicas de catálogo; verifícalas siempre en el vehículo a
 `app/models/carconcept.json` (glTF con los datos incluidos) es el «Car Concept» de Khronos (CC BY 4.0, Eric Chadwick / Darmstadt Graphics
 Group). Ver [app/models/CREDITS.md](app/models/CREDITS.md).
 
+## Estilo visual
+
+- Tipografías libres de Google Fonts con aire automotriz: **Michroma** (inspirada en Eurostile/Microgramma,
+  la letra clásica de tableros y marcas de autos) para el nombre y los títulos, y **Saira / Saira Condensed**
+  (una grotesca pensada para deporte y carreras) para el texto y los números tipo tablero.
+- Paleta blanco/negro con un rojo de carreras como único color de acento (inspirada en el sistema de diseño de
+  Ferrari analizado en [awesome-design-md](https://github.com/VoltAgent/awesome-design-md)).
+- No se usan las fuentes de Ferrari (FerrariSans) ni de Porsche (Porsche Next): tienen licencia privada.
+
 ## Uso técnico
 
 - La app usa Three.js 0.147 desde jsDelivr. Hace falta internet la primera vez que se abre.
