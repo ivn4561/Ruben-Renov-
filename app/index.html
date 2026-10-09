@@ -1189,15 +1189,55 @@
   stage.addEventListener('dragleave', (e) => { if (e.target === stage || e.target.id === 'drop') $('#drop').hidden = true; });
   stage.addEventListener('drop', (e) => { e.preventDefault(); $('#drop').hidden = true; loadFile(e.dataTransfer.files[0]); });
 
+  // Carga un modelo glTF publicado como JSON con sus datos en base64.
+  // La página publicada no deja leer direcciones «data:» ni «blob:» con fetch, así que aquí
+  // se decodifican los datos a mano, se arma un GLB en memoria y las texturas se cargan
+  // como imágenes normales (TextureLoader) en lugar de ImageBitmapLoader.
+  async function loadEmbeddedModel(url) {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const json = await res.json();
+    let bin = null;
+    const buf0 = json.buffers && json.buffers[0];
+    if (buf0 && typeof buf0.uri === 'string' && buf0.uri.startsWith('data:')) {
+      const raw = atob(buf0.uri.slice(buf0.uri.indexOf(',') + 1));
+      bin = new Uint8Array(raw.length);
+      for (let i = 0; i < raw.length; i++) bin[i] = raw.charCodeAt(i);
+      delete buf0.uri;
+    }
+    const enc = new TextEncoder();
+    let jsonBytes = enc.encode(JSON.stringify(json));
+    const jsonLen = Math.ceil(jsonBytes.length / 4) * 4;
+    const binLen = bin ? Math.ceil(bin.length / 4) * 4 : 0;
+    const total = 12 + 8 + jsonLen + (bin ? 8 + binLen : 0);
+    const glb = new ArrayBuffer(total);
+    const dv = new DataView(glb), u8 = new Uint8Array(glb);
+    dv.setUint32(0, 0x46546C67, true); dv.setUint32(4, 2, true); dv.setUint32(8, total, true);
+    dv.setUint32(12, jsonLen, true); dv.setUint32(16, 0x4E4F534A, true);
+    u8.fill(0x20, 20, 20 + jsonLen); u8.set(jsonBytes, 20);
+    if (bin) {
+      const o = 20 + jsonLen;
+      dv.setUint32(o, binLen, true); dv.setUint32(o + 4, 0x004E4942, true);
+      u8.set(bin, o + 8);
+    }
+    jsonBytes = null; bin = null;
+    return new Promise((ok, ko) => {
+      const saved = Object.getOwnPropertyDescriptor(window, 'createImageBitmap');
+      try {
+        window.createImageBitmap = undefined;      // el cargador elige TextureLoader (sin fetch)
+        new THREE.GLTFLoader().parse(glb, '', ok, ko);
+      } catch (e) { ko(e); } finally {
+        if (saved) Object.defineProperty(window, 'createImageBitmap', saved); else delete window.createImageBitmap;
+      }
+    });
+  }
+
   // Modelo 3D abierto con carrocería curva real: «Car Concept» (Khronos glTF Sample Assets),
   // © 2024 Darmstadt Graphics Group GmbH, modelo y texturas de Eric Chadwick, licencia CC BY 4.0.
   async function loadOpenCar() {
     $('#loading').hidden = false;
     try {
-      const res = await fetch('models/carconcept.json');
-      if (!res.ok) throw new Error('HTTP ' + res.status);
-      const buf = await res.arrayBuffer();
-      const gltf = await new Promise((ok, ko) => new THREE.GLTFLoader().parse(buf, '', ok, ko));
+      const gltf = await loadEmbeddedModel('models/carconcept.json');
       const car = gltf.scene;
       car.rotation.y = CAR_YAW;               // el modelo viene mirando a lo largo de Z; lo giramos al frente (+X)
       const wrap = new THREE.Group();
@@ -1208,7 +1248,7 @@
       addSampleDesign('car');
       toast('Modelo abierto «Car Concept» (CC BY 4.0). Mira cómo el diseño sigue las curvas.');
     } catch (e) {
-      toast('No se pudo cargar el auto de muestra (' + (e && e.message ? e.message : 'error') + ').');
+      toast('No se pudo cargar el auto de muestra (' + (e && e.message ? String(e.message).slice(0, 80) : 'error') + ').');
     } finally {
       $('#loading').hidden = true;
     }
@@ -1221,10 +1261,7 @@
   async function loadMiFord() {
     $('#loading').hidden = false;
     try {
-      const res = await fetch('models/mi-ford.json');
-      if (!res.ok) throw new Error('HTTP ' + res.status);
-      const buf = await res.arrayBuffer();
-      const gltf = await new Promise((ok, ko) => new THREE.GLTFLoader().parse(buf, '', ok, ko));
+      const gltf = await loadEmbeddedModel('models/mi-ford.json');
       const scan = gltf.scene;
       // La textura del escaneo ya trae la luz real: se muestra sin sombreado extra.
       scan.traverse((o) => {
@@ -1240,13 +1277,14 @@
       scan.updateMatrixWorld(true);
       const at = (x, y, z) => scan.localToWorld(new V3(x, y, z));
       // Centros de rueda detectados en el escaneo (lado izquierdo)
-      addMeasure(at(-1.718, 0.336, -1.02), at(1.513, 0.336, -1.02), 'Entre ejes (calibra con tu cinta)', true);
+      const wb = addMeasure(at(-1.718, 0.336, -1.02), at(1.513, 0.336, -1.02), 'Entre ejes (cinta: 330 cm)', true);
       addQuickMeasures(true);
-      select(state.measures[0].id);
+      calibrateWith(wb, 330);   // medida real tomada con cinta el 09/10
+      select(wb.id);
       addSampleDesign();
-      toast('Tu Ford escaneada. Mide entre ejes con cinta, escríbelo en «Medida real» y pulsa «Calibrar escala».');
+      toast('Tu Ford escaneada, calibrada con 330 cm entre ejes medidos con cinta.');
     } catch (e) {
-      toast('No se pudo cargar tu escaneo (' + (e && e.message ? e.message : 'error') + '). Se muestra la van de ejemplo.');
+      toast('No se pudo cargar tu escaneo (' + (e && e.message ? String(e.message).slice(0, 80) : 'error') + '). Se muestra la van de ejemplo.');
       $('#demoSel').value = 'l2';
       loadDemo();
     } finally {
@@ -1385,19 +1423,23 @@
   });
   $('#delBtn').addEventListener('click', () => { if (state.selected != null) removeMeasure(state.selected); });
   $('#quickBtn').addEventListener('click', () => addQuickMeasures(false));
-  $('#calibBtn').addEventListener('click', () => {
-    const m = state.measures.find((x) => x.id === state.selected);
-    const real = parseFloat(String($('#realCm').value).replace(',', '.'));
-    if (!m) return;
-    if (!(real > 0)) { toast('Escribe la medida real en centímetros, por ejemplo 293,3.'); return; }
+  function calibrateWith(m, real) {
     const cur = measureCm(m);
-    if (cur <= 0) return;
+    if (!(cur > 0) || !(real > 0)) return false;
     state.scale *= real / cur;
     state.calibratedWith = m.name;
     for (const x of state.measures) updateMeasure(x);
     renderList();
     updateDims();
     renderDesigns();
+    return true;
+  }
+  $('#calibBtn').addEventListener('click', () => {
+    const m = state.measures.find((x) => x.id === state.selected);
+    const real = parseFloat(String($('#realCm').value).replace(',', '.'));
+    if (!m) return;
+    if (!(real > 0)) { toast('Escribe la medida real en centímetros, por ejemplo 293,3.'); return; }
+    if (!calibrateWith(m, real)) return;
     $('#realCm').value = '';
     toast('Escala calibrada con «' + m.name + '». Todas las medidas se actualizaron.');
   });
