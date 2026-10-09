@@ -440,7 +440,8 @@
       <label class="btn ghost" for="imgInput">Importar diseño</label>
       <input id="imgInput" type="file" accept="image/*,.svg" hidden>
       <select id="demoSel" class="btn ghost selectbtn" aria-label="Van de ejemplo">
-        <option value="l2" selected>Ejemplo L2 (larga)</option>
+        <option value="miford" selected>Mi Ford (escaneo)</option>
+        <option value="l2">Ejemplo L2 (larga)</option>
         <option value="l1">Ejemplo L1 (corta)</option>
         <option value="car">Auto real de código abierto</option>
       </select>
@@ -1214,8 +1215,48 @@
   }
   const CAR_YAW = Math.PI / 2;
 
+  // Escaneo real de la Ford Transit Custom L2 (Scaniverse, 08/10/2026), ya recortado del parking,
+  // con el piso nivelado, enderezado (frente hacia +X) y la textura reducida a 2048 px.
+  // Escala tal como salió del escaneo: se calibra con la medida real entre ejes.
+  async function loadMiFord() {
+    $('#loading').hidden = false;
+    try {
+      const res = await fetch('models/mi-ford.json');
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const buf = await res.arrayBuffer();
+      const gltf = await new Promise((ok, ko) => new THREE.GLTFLoader().parse(buf, '', ok, ko));
+      const scan = gltf.scene;
+      // La textura del escaneo ya trae la luz real: se muestra sin sombreado extra.
+      scan.traverse((o) => {
+        if (o.isMesh && o.material && o.material.map) {
+          const m = new THREE.MeshBasicMaterial({ map: o.material.map });
+          o.material.dispose();
+          o.material = m;
+        }
+      });
+      const wrap = new THREE.Group();
+      wrap.add(scan);
+      setContent(wrap, 'Mi Ford · Transit Custom L2 · escaneo Scaniverse 08/10');
+      scan.updateMatrixWorld(true);
+      const at = (x, y, z) => scan.localToWorld(new V3(x, y, z));
+      // Centros de rueda detectados en el escaneo (lado izquierdo)
+      addMeasure(at(-1.718, 0.336, -1.02), at(1.513, 0.336, -1.02), 'Entre ejes (calibra con tu cinta)', true);
+      addQuickMeasures(true);
+      select(state.measures[0].id);
+      addSampleDesign();
+      toast('Tu Ford escaneada. Mide entre ejes con cinta, escríbelo en «Medida real» y pulsa «Calibrar escala».');
+    } catch (e) {
+      toast('No se pudo cargar tu escaneo (' + (e && e.message ? e.message : 'error') + '). Se muestra la van de ejemplo.');
+      $('#demoSel').value = 'l2';
+      loadDemo();
+    } finally {
+      $('#loading').hidden = true;
+    }
+  }
+
   function loadDemo() {
     if ($('#demoSel').value === 'car') { loadOpenCar(); return; }
+    if ($('#demoSel').value === 'miford') { loadMiFord(); return; }
     VAN = VANS[$('#demoSel').value] || VANS.l2;
     setContent(buildDemoVan(), VAN.label);
     demoMeasures();

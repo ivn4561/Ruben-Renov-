@@ -99,6 +99,20 @@ Estas son medidas públicas de catálogo; verifícalas siempre en el vehículo a
 - En curvas muy cerradas (esquinas del paragolpes, pasos de rueda) el vinilo real se estira un poco;
   el instalador lo ajusta con calor y el sobrante.
 
+## Mi Ford (escaneo real)
+
+`app/models/mi-ford.json` es el escaneo de la Ford Transit Custom L2 hecho con Scaniverse el 08/10
+(el original está en `Scaniverse 2026-10-08 101546.glb`). Se preparó así, con `tools/limpiar-mi-ford.mjs`:
+
+- se recortó del parking: piso, paredes, techo del parking y otro vehículo;
+- se niveló con el piso (estaba inclinado ~1°) y se enderezó (estaba girado ~80°), con el frente hacia la flecha;
+- se quitaron trozos sueltos y restos de piso bajo la van;
+- la textura se redujo de 8192 a 2048 px (de ~360 MB a ~16 MB de memoria gráfica) para que funcione en el iPhone.
+
+Medidas del escaneo sin calibrar: 524,0 × 201,5 × 232,6 cm, con 323,1 cm entre ejes (el escaneo sale ~2 % más
+pequeño). Calibrando con la distancia entre ejes real, el largo coincide con el de fábrica. El techo quedó con
+huecos (no se escaneó desde arriba), así que no sirve para plantillas del techo.
+
 ## Modelo de código abierto incluido
 
 `app/models/carconcept.json` (glTF con los datos incluidos) es el «Car Concept» de Khronos (CC BY 4.0, Eric Chadwick / Darmstadt Graphics
