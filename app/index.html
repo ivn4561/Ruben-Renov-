@@ -857,6 +857,126 @@
     return out;
   }
 
+  // ---- Calcomanía sobre escaneos con luz «horneada» (Scaniverse, Polycam…) ----
+  // El escaneo trae la luz real en su textura. Para que el diseño no parezca pegado encima,
+  // se toma la luminosidad del escaneo bajo cada punto del diseño: oscurece en las sombras,
+  // aclara en los reflejos y deja ver juntas, manijas y relieves, como el vinilo real.
+  const lumCache = new WeakMap();
+  function textureLuminance(tex) {
+    if (lumCache.has(tex)) return lumCache.get(tex);
+    let out = null;
+    try {
+      const img = tex.image;
+      const S = 512;
+      const cv = document.createElement('canvas');
+      cv.width = S; cv.height = S;
+      const g2 = cv.getContext('2d');
+      g2.drawImage(img, 0, 0, S, S);
+      const px = g2.getImageData(0, 0, S, S).data;
+      const lin = (v) => { v /= 255; return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+      const L = new Float32Array(S * S);
+      for (let i = 0; i < S * S; i++) L[i] = 0.2126 * lin(px[i * 4]) + 0.7152 * lin(px[i * 4 + 1]) + 0.0722 * lin(px[i * 4 + 2]);
+      out = { S, L, flipY: tex.flipY };
+    } catch (e) { out = null; }
+    lumCache.set(tex, out);
+    return out;
+  }
+
+  const BAKED_VS = `
+    attribute vec3 dUV;
+    attribute vec2 uvScan;
+    varying vec3 vD;
+    varying vec2 vS;
+    void main() {
+      vD = dUV;
+      vS = uvScan;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }`;
+  const BAKED_FS = `
+    uniform sampler2D design;
+    uniform sampler2D scan;
+    uniform float opacity;
+    uniform float L0;
+    varying vec3 vD;
+    varying vec2 vS;
+    void main() {
+      if (vD.x < 0.0 || vD.x > 1.0 || vD.y < 0.0 || vD.y > 1.0 || abs(vD.z) > 0.5) discard;
+      vec4 d = texture2D(design, vD.xy);
+      if (d.a < 0.004) discard;
+      vec3 s = texture2D(scan, vS).rgb;
+      float k = dot(s, vec3(0.2126, 0.7152, 0.0722)) / max(L0, 1e-4);
+      float shade = clamp(k, 0.22, 1.0);
+      float gloss = clamp((k - 1.12) * 0.30, 0.0, 0.30);
+      gl_FragColor = vec4(d.rgb * shade + vec3(gloss), d.a * opacity);
+      #include <encodings_fragment>
+    }`;
+
+  function projectBakedDecal(mesh, center, quat, size, designTex, opacity, facingMin) {
+    const g = mesh.geometry, pos = g.attributes.position, uv = g.attributes.uv;
+    const map = mesh.material && mesh.material.map;
+    if (!pos || !uv || !map) return null;
+    mesh.updateMatrixWorld(true);
+    const proj = new THREE.Matrix4().compose(center, quat, new V3(1, 1, 1));
+    const M = proj.clone().invert().multiply(mesh.matrixWorld);
+    const n = pos.count;
+    const loc = new Float32Array(n * 3);
+    const v = new V3();
+    for (let i = 0; i < n; i++) {
+      v.fromBufferAttribute(pos, i).applyMatrix4(M);
+      loc[i * 3] = v.x; loc[i * 3 + 1] = v.y; loc[i * 3 + 2] = v.z;
+    }
+    const hx = size.x / 2, hy = size.y / 2, hz = size.z / 2;
+    const idx = g.index;
+    const triCount = idx ? idx.count / 3 : n / 3;
+    const lum = textureLuminance(map);
+    const P = [], D = [], U = [], lums = [];
+    const w = new V3();
+    for (let t = 0; t < triCount; t++) {
+      const a = idx ? idx.getX(t * 3) : t * 3, b = idx ? idx.getX(t * 3 + 1) : t * 3 + 1, c = idx ? idx.getX(t * 3 + 2) : t * 3 + 2;
+      const ax = loc[a * 3], ay = loc[a * 3 + 1], az = loc[a * 3 + 2];
+      const bx = loc[b * 3], by = loc[b * 3 + 1], bz = loc[b * 3 + 2];
+      const cx = loc[c * 3], cy = loc[c * 3 + 1], cz = loc[c * 3 + 2];
+      if (Math.max(ax, bx, cx) < -hx || Math.min(ax, bx, cx) > hx) continue;
+      if (Math.max(ay, by, cy) < -hy || Math.min(ay, by, cy) > hy) continue;
+      if (Math.max(az, bz, cz) < -hz || Math.min(az, bz, cz) > hz) continue;
+      // Solo las caras que miran hacia esa vista
+      const e1x = bx - ax, e1y = by - ay, e1z = bz - az, e2x = cx - ax, e2y = cy - ay, e2z = cz - az;
+      const nx = e1y * e2z - e1z * e2y, ny = e1z * e2x - e1x * e2z, nz = e1x * e2y - e1y * e2x;
+      const nl = Math.hypot(nx, ny, nz) || 1;
+      if (nz / nl < facingMin) continue;
+      for (const k of [a, b, c]) {
+        w.fromBufferAttribute(pos, k).applyMatrix4(mesh.matrixWorld);
+        P.push(w.x, w.y, w.z);
+        const lx = loc[k * 3], ly = loc[k * 3 + 1], lz = loc[k * 3 + 2];
+        D.push(lx / size.x + 0.5, ly / size.y + 0.5, lz / size.z);
+        const su = uv.getX(k), sv = uv.getY(k);
+        U.push(su, sv);
+        if (lum && Math.abs(lx) < hx && Math.abs(ly) < hy) {
+          const px = Math.min(lum.S - 1, Math.max(0, Math.floor(su * lum.S)));
+          const py = Math.min(lum.S - 1, Math.max(0, Math.floor((lum.flipY ? 1 - sv : sv) * lum.S)));
+          lums.push(lum.L[py * lum.S + px]);
+        }
+      }
+    }
+    if (!P.length) return null;
+    lums.sort((x, y) => x - y);
+    // Luz de referencia: la de la pintura bajo el diseño (percentil 60, para no dejarse llevar por juntas y vidrios)
+    const L0 = lums.length ? Math.max(0.02, lums[Math.floor(lums.length * 0.6)]) : 0.2;
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(P, 3));
+    geo.setAttribute('dUV', new THREE.Float32BufferAttribute(D, 3));
+    geo.setAttribute('uvScan', new THREE.Float32BufferAttribute(U, 2));
+    const mat = new THREE.ShaderMaterial({
+      uniforms: { design: { value: designTex }, scan: { value: map }, opacity: { value: opacity }, L0: { value: L0 } },
+      vertexShader: BAKED_VS, fragmentShader: BAKED_FS,
+      transparent: true, depthWrite: false,
+      polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4,
+    });
+    const out = new THREE.Mesh(geo, mat);
+    out.userData.noDecal = true;
+    return out;
+  }
+
   function decalTargets() {
     const list = [];
     if (content) content.traverse((o) => { if (o.isMesh && o.visible && !o.userData.noDecal) list.push(o); });
@@ -1155,7 +1275,19 @@
       const buf = await file.arrayBuffer();
       let obj;
       if (ext === 'glb' || ext === 'gltf') {
-        obj = await new Promise((res, rej) => new THREE.GLTFLoader().parse(buf, '', (g) => res(g.scene), rej));
+        const gltf = await new Promise((res, rej) => new THREE.GLTFLoader().parse(buf, '', res, rej));
+        obj = gltf.scene;
+        // Escaneos de iPhone: la textura ya trae la luz real → se muestran sin sombreado extra
+        const gen = String((gltf.asset && gltf.asset.generator) || '');
+        const isScan = /scaniverse|polycam|reality|luma|kiri|scanner|metascan/i.test(gen);
+        obj.traverse((o) => {
+          if (o.isMesh && o.material && o.material.map && (isScan || !o.geometry.attributes.normal)) {
+            const m = new THREE.MeshBasicMaterial({ map: o.material.map });
+            o.material.dispose();
+            o.material = m;
+            o.userData.baked = true;
+          }
+        });
       } else if (ext === 'obj') {
         obj = new THREE.OBJLoader().parse(new TextDecoder().decode(buf));
         const mat = new THREE.MeshStandardMaterial({ color: 0xe6e9e7, roughness: 0.6, side: THREE.DoubleSide });
@@ -1269,6 +1401,7 @@
           const m = new THREE.MeshBasicMaterial({ map: o.material.map });
           o.material.dispose();
           o.material = m;
+          o.userData.baked = true;
         }
       });
       const wrap = new THREE.Group();
@@ -1281,6 +1414,7 @@
       addQuickMeasures(true);
       calibrateWith(wb, 330);   // medida real tomada con cinta el 09/10
       select(wb.id);
+      try { await Promise.all([document.fonts.load('800 170px "Saira Condensed"'), document.fonts.load('500 64px Saira')]); } catch (e) { /* letra de respaldo */ }
       addSampleDesign();
       toast('Tu Ford escaneada, calibrada con 330 cm entre ejes medidos con cinta.');
     } catch (e) {
@@ -1657,8 +1791,9 @@
     state.mode = mode;
     document.querySelectorAll('[data-mode]').forEach((x) => x.setAttribute('aria-pressed', String(x.dataset.mode === mode)));
     if (mode !== 'measure') cancelPending();
-    overlay.visible = mode !== 'design';
-    labelsEl.classList.toggle('hide-m', mode === 'design');
+    // Las líneas de medida solo se ven en «Medir»; «Diseño» y «Mover» muestran la van limpia
+    overlay.visible = mode === 'measure';
+    labelsEl.classList.toggle('hide-m', mode !== 'measure');
     if (mode === 'design' && state.view === '3d') {
       const d = selDesign();
       setView(d ? d.view : 'left');
@@ -1879,13 +2014,14 @@
     d.mesh.scale.set(d.w, d.h, 1);
     d.mesh.material.opacity = d.opacity;
     d.decalMat.opacity = d.opacity;
+    for (const m of d.decals) if (m.material.uniforms) m.material.uniforms.opacity.value = d.opacity;
     if (recomputeDepth) rebuildDecal(d, f, q);
     else showFlat(d);
     dirty = true;
   }
 
   function clearDecal(d) {
-    for (const m of d.decals) { designGroup.remove(m); m.geometry.dispose(); }
+    for (const m of d.decals) { designGroup.remove(m); m.geometry.dispose(); if (m.material !== d.decalMat) m.material.dispose(); }
     d.decals = [];
   }
   function showFlat(d) {
@@ -1907,7 +2043,14 @@
     const dz = Math.min(unitsOf(150), Math.max(unitsOf(40), along * 2 * 0.6));
     const center = d.mesh.position.clone().addScaledVector(f, dz * 0.3);
     let meshes = [];
-    try { meshes = projectDecal(decalTargets(), center, q, new V3(d.w, d.h, dz), d.decalMat, 0.12); } catch (e) { meshes = []; }
+    const size = new V3(d.w, d.h, dz);
+    const targets = decalTargets();
+    const baked = targets.filter((m) => m.userData.baked && m.material && m.material.map && m.geometry.attributes.uv);
+    const lit = targets.filter((m) => !baked.includes(m));
+    try { if (lit.length) meshes = projectDecal(lit, center, q, size, d.decalMat, 0.12); } catch (e) { meshes = []; }
+    for (const m of baked) {
+      try { const bm = projectBakedDecal(m, center, q, size, d.mesh.material.map, d.opacity, 0.12); if (bm) meshes.push(bm); } catch (e) { /* se queda la lámina plana */ }
+    }
     for (const m of meshes) {
       m.renderOrder = 6;
       m.userData.designId = d.id;
@@ -1970,32 +2113,62 @@
   $('#imgInput').addEventListener('change', (e) => { importDesign(e.target.files[0]); e.target.value = ''; });
 
   // Diseño de muestra para la van de ejemplo (se reemplaza importando tu imagen).
+  // Muestra de rotulado lateral (formas recortadas, como un rotulado profesional).
+  // Reemplázala importando tu propio diseño (PNG con transparencia o SVG).
   function addSampleDesign(place) {
+    const W = 2480, H = 880;  // 8 px por cm → 310 × 110 cm
     const cv = document.createElement('canvas');
-    cv.width = 1600; cv.height = 560;
+    cv.width = W; cv.height = H;
     const g = cv.getContext('2d');
-    g.fillStyle = '#12355b'; g.fillRect(0, 0, 1600, 560);
-    g.fillStyle = '#e8a33d';
-    g.beginPath(); g.moveTo(1050, 0); g.lineTo(1600, 0); g.lineTo(1600, 560); g.lineTo(760, 560); g.closePath(); g.fill();
+    const top = (t) => [W * (0.18 + 0.82 * t), H * (0.55 - 0.55 * Math.pow(t, 0.7))];
+    // Gran forma oscura que nace delgada y se abre hacia atrás
+    g.fillStyle = '#16181d';
+    g.beginPath();
+    g.moveTo(W * 0.18, H * 0.55);
+    g.bezierCurveTo(W * 0.42, H * 0.34, W * 0.62, H * 0.06, W, 0);
+    g.lineTo(W, H);
+    g.lineTo(W * 0.32, H);
+    g.bezierCurveTo(W * 0.27, H * 0.80, W * 0.22, H * 0.66, W * 0.18, H * 0.55);
+    g.closePath();
+    g.fill();
+    // Filetes de acento siguiendo la curva
+    const stroke = (dy, color, lw) => {
+      g.strokeStyle = color; g.lineWidth = lw; g.lineCap = 'round';
+      g.beginPath();
+      g.moveTo(W * 0.10, H * 0.62 + dy);
+      g.bezierCurveTo(W * 0.40, H * 0.30 + dy, W * 0.62, H * 0.02 + dy, W * 1.02, -H * 0.04 + dy);
+      g.stroke();
+    };
+    stroke(-38, '#ffffff', 16);
+    stroke(-74, '#d32a1e', 10);
+    // Textos
     g.fillStyle = '#ffffff';
-    g.font = 'bold 150px Arial, Helvetica, sans-serif';
-    g.fillText('TU DISEÑO', 80, 250);
-    g.font = '64px Arial, Helvetica, sans-serif';
-    g.fillText('Importa tu imagen aquí', 86, 360);
-    g.font = '48px Arial, Helvetica, sans-serif';
-    g.fillText('+33 0 00 00 00 00', 86, 470);
+    g.font = '800 170px "Saira Condensed", "Arial Narrow", Arial, sans-serif';
+    g.fillText('TU MARCA', W * 0.47, H * 0.60);
+    g.font = '500 64px Saira, Arial, sans-serif';
+    g.fillStyle = '#d9dbe0';
+    g.fillText('Tu eslogan o tus servicios aquí', W * 0.475, H * 0.72);
+    g.fillStyle = '#ffffff';
+    g.font = '700 86px "Saira Condensed", "Arial Narrow", Arial, sans-serif';
+    g.fillText('+33 6 00 00 00 00', W * 0.475, H * 0.86);
+    g.font = '500 58px Saira, Arial, sans-serif';
+    g.fillStyle = '#d9dbe0';
+    g.fillText('www.tumarca.fr', W * 0.78, H * 0.86);
     const url = cv.toDataURL('image/png');
     const { ex } = viewFrame('left');
     const vw = ex.maxR - ex.minR, vh = ex.maxU - ex.minU;
     let w, h, sr, su;
     if (place === 'car') {
-      w = vw * 0.36; h = w * 560 / 1600;
-      sr = ex.minR + vw * 0.5; su = ex.minU + vh * 0.5;
+      w = vw * 0.62; h = w * H / W;
+      sr = ex.minR + vw * 0.62; su = ex.minU + vh * 0.48;
     } else {
-      w = unitsOf(270); h = w * 560 / 1600;
-      sr = ex.minR + unitsOf(235) + w / 2; su = ex.minU + unitsOf(75) + h / 2;
+      // Zona de carga del lado izquierdo: desde ~2,30 m del frente hasta atrás, de 80 a 190 cm de alto
+      const startCm = 230, lengthCm = cmOf(vw);
+      const wCm = Math.min(310, lengthCm - startCm + 2);
+      w = unitsOf(wCm); h = w * H / W;
+      sr = ex.minR + unitsOf(startCm) + w / 2; su = ex.minU + unitsOf(80) + h / 2;
     }
-    const d = addDesign({ name: 'Ejemplo de diseño', url, img: cv, view: 'left', sr, su, w, h });
+    const d = addDesign({ name: 'Ejemplo de rotulado', url, img: cv, view: 'left', sr, su, w, h });
     selectDesign(d.id, true);
   }
 
@@ -2137,6 +2310,7 @@
     d.opacity = parseFloat($('#dOp').value);
     d.mesh.material.opacity = d.opacity;
     d.decalMat.opacity = d.opacity;
+    for (const m of d.decals) if (m.material.uniforms) m.material.uniforms.opacity.value = d.opacity;
     dirty = true;
   });
   $('#dWrap').addEventListener('change', onDesignInput((d) => { d.wrap = $('#dWrap').checked; }));
@@ -2285,7 +2459,7 @@
     helpers.visible = overlay.visible = designGroup.visible = false;
     off.render(scene, cam);
     helpers.visible = designGroup.visible = true;
-    overlay.visible = state.mode !== 'design';
+    overlay.visible = state.mode === 'measure';
     const url = off.domElement.toDataURL('image/png');
     off.dispose();
     if (off.forceContextLoss) off.forceContextLoss();
